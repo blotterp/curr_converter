@@ -3,6 +3,7 @@ from database import db
 from models import CurrencyRate
 from services import update_rates
 from flask import render_template
+from services import convert_currency, CurrencyNotFoundError
 
 app = Flask(__name__)
 
@@ -34,40 +35,38 @@ def last_update():
     })
 
 @app.route('/api/convert', methods=['POST'])
-def convert_currency():
+def convert_currency_endpoint():
     data = request.json
 
-    from_currency = data.get("from").upper().strip()
-    to_currency = data.get("to").upper().strip()
-    amount = float(data.get("amount"))
-    
-    if from_currency == "EUR":
-        rate_obj = CurrencyRate.query.filter_by(
-        target_currency=to_currency).first()
+    try:
+        amount = float(data.get("amount"))
+        from_currency = data.get("from").upper().strip()
+        to_currency = data.get("to").upper().strip()
 
-        if not rate_obj:
-            return jsonify({"error": "Currency not found"}), 400
+        result = convert_currency(
+            amount=amount,
+            from_currency=from_currency,
+            to_currency=to_currency
+        )
 
-        rate = rate_obj.rate
-        result = amount * rate
-    else:
-        from_rate_obj = CurrencyRate.query.filter_by(
-            target_currency=from_currency
-        ).first()
-        if not from_rate_obj: 
-            return jsonify({"error": "Currency not found"}), 400
-        from_rate = from_rate_obj.rate
-        to_rate_obj = CurrencyRate.query.filter_by(
-            target_currency=to_currency
-        ).first()
+    except CurrencyNotFoundError as e:
+        return jsonify({"error": f"Currency not found: {e}"}), 400
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid input"}), 400
 
-        if not to_rate_obj:
-            return jsonify({"error": "Currency not found"}), 400
-        to_rate = to_rate_obj.rate
-        result = amount / from_rate * to_rate
+    return jsonify({"result": round(result, 2)})
+
+@app.route('/api/currencies', methods=['GET'])
+def get_currencies():
+    currencies = (
+        CurrencyRate.query
+        .with_entities(CurrencyRate.target_currency)
+        .distinct()
+        .all()
+    )
 
     return jsonify({
-        "result": round(result, 2)
+        "currencies": [c[0] for c in currencies]
     })
 
 if __name__ == '__main__':
